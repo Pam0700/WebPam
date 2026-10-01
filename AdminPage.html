@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<style>
+:root{--bg:#f5f7fa;--card:#fff;--tx:#1b2430;--mut:#6b7785;--bd:#dde3ea;--pri:#1f6feb;--ok:#1a7f37;--bad:#cf222e;--warn:#9a6700}
+@media(prefers-color-scheme:dark){:root{--bg:#0f141a;--card:#18202a;--tx:#e6edf3;--mut:#8b98a7;--bd:#2a3541;--pri:#4493f8;--ok:#3fb950;--bad:#f85149;--warn:#d29922}}
+*{box-sizing:border-box}body{margin:0;font:14px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--tx)}
+header{padding:12px 16px;font-weight:600;border-bottom:1px solid var(--bd);background:var(--card);display:flex;justify-content:space-between;gap:8px}
+nav{display:flex;overflow-x:auto;background:var(--card);border-bottom:1px solid var(--bd)}
+nav button{flex:none;padding:10px 14px;border:0;background:none;color:var(--mut);font:inherit;cursor:pointer;border-bottom:2px solid transparent}
+nav button.on{color:var(--pri);border-color:var(--pri);font-weight:600}
+main{padding:12px;max-width:900px;margin:auto}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:12px;margin-bottom:12px}
+h3{margin:0 0 8px;font-size:15px}
+.row{display:flex;justify-content:space-between;gap:8px;padding:4px 0;border-bottom:1px dashed var(--bd)}
+.row:last-child{border:0}
+.ok{color:var(--ok)}.bad{color:var(--bad)}.warn{color:var(--warn)}.mut{color:var(--mut)}
+input,select,textarea{width:100%;padding:8px;border:1px solid var(--bd);border-radius:6px;background:var(--bg);color:var(--tx);font:inherit}
+button.b{padding:8px 12px;border:0;border-radius:6px;background:var(--pri);color:#fff;font:inherit;cursor:pointer;margin:4px 4px 4px 0}
+button.b.g{background:var(--mut)}
+pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);padding:8px;border-radius:6px;margin:6px 0 0;max-height:240px;overflow:auto;font-size:12px}
+.log{padding:6px 0;border-bottom:1px solid var(--bd);font-size:13px}
+.cfg{display:grid;grid-template-columns:1fr auto;gap:6px;margin-bottom:10px}
+.cfg small{grid-column:1/-1;color:var(--mut)}
+.hide{display:none}
+</style>
+</head>
+<body>
+<header><span>🤖 Zalo Affiliate Bot</span><span id="ver" class="mut"></span></header>
+<nav id="nav"></nav>
+<main>
+<section id="t-overview"></section>
+<section id="t-config" class="hide"></section>
+<section id="t-logs" class="hide"></section>
+<section id="t-tools" class="hide"></section>
+</main>
+<script>
+const TOKEN = <?!= JSON.stringify(token) ?>;
+const TABS = [['overview','Tổng quan'],['config','Cấu hình'],['logs','Logs'],['tools','Công cụ']];
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function api(action, params) {
+  return new Promise((resolve) => {
+    google.script.run
+      .withSuccessHandler(r => resolve(r || {ok:false,error:'Không có phản hồi'}))
+      .withFailureHandler(e => resolve({ok:false,error:e.message}))
+      .adminApi(TOKEN, action, params || {});
+  });
+}
+const flag = b => b ? '<span class="ok">✔ Có</span>' : '<span class="bad">✘ Thiếu</span>';
+
+function show(tab) {
+  TABS.forEach(t => { $('t-'+t[0]).classList.toggle('hide', t[0] !== tab); });
+  [...$('nav').children].forEach(b => b.classList.toggle('on', b.dataset.t === tab));
+  ({overview:loadOverview, config:loadConfig, logs:loadLogs, tools:loadTools})[tab]();
+}
+$('nav').innerHTML = TABS.map(t => `<button data-t="${t[0]}">${t[1]}</button>`).join('');
+$('nav').onclick = e => { if (e.target.dataset.t) show(e.target.dataset.t); };
+
+async function loadOverview() {
+  const el = $('t-overview'); el.innerHTML = '<div class="card mut">Đang tải...</div>';
+  const r = await api('overview');
+  if (!r.ok) { el.innerHTML = `<div class="card bad">${esc(r.error)}</div>`; return; }
+  const d = r.data; $('ver').textContent = 'v' + d.version;
+  const p = d.props;
+  el.innerHTML = `
+  <div class="card"><h3>Trạng thái</h3>
+    <div class="row"><span>TEST_MODE</span><b class="${d.testMode?'warn':'ok'}">${d.testMode?'BẬT':'Tắt'}</b></div>
+    <div class="row"><span>Giờ hệ thống</span><span>${esc(d.time)}</span></div>
+    ${p.sheetUrl ? `<div class="row"><span>Google Sheet</span><a href="${esc(p.sheetUrl)}" target="_blank">Mở</a></div>` : ''}
+    ${p.sheetError ? `<div class="bad">${esc(p.sheetError)}</div>` : ''}
+  </div>
+  <div class="card"><h3>Script Properties</h3>
+    ${['SPREADSHEET_ID','ZALO_BOT_TOKEN','ZALO_BOT_SECRET','WEBHOOK_KEY','ADMIN_USER_IDS','SHOPEE_COOKIE'].map(k=>`<div class="row"><span>${k}</span>${flag(p[k])}</div>`).join('')}
+  </div>
+  <div class="card"><h3>Các Sheet</h3>
+    ${d.tabs.map(t=>`<div class="row"><span>${esc(t.name)}</span><span>${!t.exists?'<span class="bad">Chưa có</span>':(t.headerOk?'<span class="ok">Header đúng</span>':'<span class="bad">Header sai</span>')} <span class="mut">· ${t.rows} dòng</span></span></div>`).join('')}
+  </div>`;
+}
+
+async function loadConfig() {
+  const el = $('t-config'); el.innerHTML = '<div class="card mut">Đang tải...</div>';
+  const r = await api('getConfig');
+  if (!r.ok) { el.innerHTML = `<div class="card bad">${esc(r.error)}</div>`; return; }
+  el.innerHTML = '<div class="card"><h3>Cấu hình (sheet Config)</h3>' + r.data.map(c => c.key === 'SYNC_CURSOR' ? '' :
+    `<div class="cfg"><div><b>${esc(c.key)}</b></div><div></div>
+     <input id="c-${esc(c.key)}" value="${esc(c.value)}"><button class="b" data-k="${esc(c.key)}">Lưu</button>
+     <small>${esc(c.description)}</small></div>`).join('') +
+    '<div class="mut">Token, cookie, secret chỉ sửa trong Script Properties.</div></div>';
+  el.onclick = async e => {
+    const k = e.target.dataset.k; if (!k) return;
+    const res = await api('setConfig', {key:k, value:$('c-'+k).value});
+    e.target.textContent = res.ok ? 'Đã lưu ✔' : 'Lỗi'; if(!res.ok) alert(res.error);
+    setTimeout(() => e.target.textContent = 'Lưu', 1500);
+  };
+}
+
+async function loadLogs() {
+  const el = $('t-logs');
+  el.innerHTML = `<div class="card"><select id="lv"><option value="">Tất cả mức</option><option>ERROR</option><option>WARN</option><option>INFO</option></select>
+    <div id="logbox" class="mut" style="margin-top:8px">Đang tải...</div></div>`;
+  $('lv').onchange = fetchLogs; fetchLogs();
+}
+async function fetchLogs() {
+  const r = await api('logs', {limit:100, level:$('lv').value});
+  $('logbox').innerHTML = !r.ok ? `<span class="bad">${esc(r.error)}</span>` :
+    (r.data.length ? r.data.map(l => `<div class="log"><span class="${l.level==='ERROR'?'bad':l.level==='WARN'?'warn':'ok'}">${esc(l.level)}</span>
+      <span class="mut">${esc(l.t)}</span> <b>${esc(l.event)}</b><br>${esc(l.msg)}${l.data?`<pre>${esc(l.data)}</pre>`:''}</div>`).join('') : 'Chưa có log.');
+}
+
+function loadTools() {
+  const el = $('t-tools');
+  el.innerHTML = `
+  <div class="card"><h3>Zalo Bot</h3>
+    <button class="b" id="b1">getMe</button><button class="b" id="b2">Xem webhook</button>
+    <button class="b g" id="b3">Đăng ký webhook</button><pre id="out1">—</pre>
+    <div class="mut">Chỉ đăng ký webhook sau khi đã thêm doPost (Phase 5).</div></div>
+  <div class="card"><h3>Gửi tin test</h3>
+    <input id="cid" placeholder="chat_id (test_... = mô phỏng, không gửi thật)"><br><br>
+    <textarea id="txt" rows="3">✅ Tin nhắn test từ trang admin.</textarea>
+    <button class="b" id="b4">Gửi</button><pre id="out2">—</pre></div>`;
+  const run = (btn, out, action, params) => $(btn).onclick = async () => {
+    $(out).textContent = 'Đang chạy...';
+    const r = await api(action, params ? params() : {});
+    $(out).textContent = JSON.stringify(r.ok ? r.data : {error:r.error}, null, 2);
+  };
+  run('b1','out1','zaloGetMe'); run('b2','out1','webhookInfo');
+  $('b3').onclick = async () => { if (!confirm('Đăng ký webhook tới URL web app hiện tại?')) return;
+    $('out1').textContent = 'Đang chạy...'; const r = await api('registerWebhook');
+    $('out1').textContent = JSON.stringify(r.ok ? r.data : {error:r.error}, null, 2); };
+  run('b4','out2','sendTest', () => ({chatId:$('cid').value, text:$('txt').value}));
+}
+show('overview');
+</script>
+</body>
+</html>
